@@ -1,0 +1,268 @@
+---
+title: "ADA Final Project"
+author: "Emmanuel Gyimah"
+date: "4/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+
+covid_19<-read.csv("/Users/manny/Documents/Advanced Data Analysis/covid04_12.1.csv")
+
+```
+
+
+```{r}
+
+library(funModeling)
+
+df_status(covid_19)
+
+```
+
+
+```{r}
+
+library(magrittr)
+library(dplyr)
+
+covid_19$date_onset = as.Date(covid_19$date_onset_symptoms, format = "%d/%m/%Y") 
+
+covid_19$date_confirm = as.Date(covid_19$date_confirmation, format = "%d/%m/%Y")
+
+covid_19 = covid_19 %>% mutate(time_confirm = date_confirm - date_onset)
+
+dim(covid_19)
+
+#Drop values missing date_onset_symptoms
+ 
+covid_1 = covid_19 %>% subset(date_onset_symptoms != "")
+ 
+dim(covid_1)
+
+#Drop values missing date of confirmation
+
+covid_2 = covid_1 %>% subset(date_confirmation != "")
+ 
+dim(covid_2)
+
+print(covid_2$time_confirm)
+
+#Drop values with time_confirm less than 14
+
+covid_2 = covid_1 %>% subset(time_confirm > -14)
+
+dim(covid_2)
+
+```
+
+```{r}
+#select necessary columns
+covid = c("sex", "country", "date_onset", "date_confirm", "symptoms", "time_confirm", "travel_history_location", "chronic_disease", "outcome", "date_death_or_discharge")
+
+covid_final = covid_2[covid]
+
+#Sex categories
+table(covid_final$sex)
+
+#Drop values without Sex information
+covid_final <- covid_final %>% subset(sex != "")
+table(covid_final$sex)
+
+dim(covid_final)
+
+summary(covid_final)
+
+```
+
+
+```{r}
+
+
+#Recoding variables
+
+covid_final = covid_final %>%
+   mutate(age_cat = case_when(sex == "female" ~ "Female",
+                              sex == "male" ~ "Male"),
+          country = case_when(country == "China" ~ "China",
+                              TRUE ~ "Other"),
+          symptoms = case_when(symptoms == "fever" ~ "fever",
+                               symptoms %in% c("cough, fever", "fever, cough") ~ "fever&cough" ,
+                               symptoms == "pneumonitis" ~ "pneumonitis",
+                               TRUE ~ "other"),
+          travel_history_location = case_when( travel_history_location == "Wuhan" ~ "Wuhan",
+                                              travel_history_location == "USA" ~ "USA",
+                                              travel_history_location == "Spain" ~ "Spain",
+                                              travel_history_location == "France" ~ "France",
+                                              TRUE ~ "Other"),
+          outcome = case_when(outcome %in% c("discharge", "recovered", "stable", "discharged") ~ "Not Dead",
+                              outcome == "died" ~ "Dead")
+          )
+
+
+summary(covid_final)
+
+table(covid_final$outcome)
+
+```
+
+
+```{r}
+#Drop rows without an outcome
+
+covid_final <- covid_final %>% subset(outcome != "")
+
+dim(covid_final)
+
+df_status(covid_final)
+
+```
+
+
+```{r}
+summary(covid_19)
+
+library(tableone)
+
+table1_vars <- c("sex","country","symptoms","time_confirm","travel_history_location", "outcome")
+
+covid = covid_final[table1_vars]
+
+colnames(covid)  <-c("Sex", "Country", "Symptoms", "Time to confimration of disease",
+                         "travel history location", "Outcome")
+  
+  
+  
+CatVars = c("Sex", "Country", "Symptoms","travel history location", "Outcome")
+
+
+#Consider recording grade into middle and high school
+tableone <- CreateTableOne(vars = table1_vars, data = covid_final, factorVars = CatVars)
+
+table1_print <- print(tableone, showAllLevels = TRUE)
+
+```
+
+
+```{r}
+
+library(kableExtra) #For table formatting
+
+table1_print %>%
+  kable(caption = "<b>Table 1: Demographic and COVID-19-related characteristics of COVID-19 patients(January to April)",
+        col.names = c("Categories", "n(%)")) %>%
+  kable_styling(bootstrap_options = c("striped", full_width = F, position = "right"))  %>%
+  column_spec(1, bold = TRUE, color = "black", width = "3.5in") %>%
+  column_spec(c(2,3), color = "black", width = "2.5in") 
+
+save(table1_print, file = "test.png")
+
+```
+
+#Data Visualization
+
+```{r}
+
+covid_final$time_confirm %>% class()
+
+covid_final$time_confirm %>% as.numeric()
+
+ggplot(data = covid_final, aes(x = time_confirm, fill =sex )) +
+geom_density(alpha=I(.7)) +
+  xlab("Number of days between date of onset\nof symptoms and diagnosis confirmation") +
+ggtitle("Time to diagnosis contrast between Female and Male COVID-19 patients")
+
+```
+
+
+```{r}
+
+table(covid_19$outcome)
+
+library(ggplot2)
+
+ggsave(filename = "boxplot.png",
+       width = 4, height = 4, units = "in")
+
+ggplot(covid_final, aes(x= outcome, y = time_confirm)) +
+  geom_boxplot(aes(fill = outcome)) +
+   ylab("Number of days between date of onset\nof symptoms and diagnosis confirmation")
+
+#dev.off() # Turn off device
+  
+```
+
+
+```{r}
+
+#Recode outcome into 0 or 1
+
+covid_final = covid_final %>% mutate(outcome = case_when(outcome == "Dead" ~ 1,
+                                                         TRUE ~ 0))
+
+table(covid_final$country)
+
+```
+
+
+```{r}
+
+library(odds.n.ends)
+
+#Unadjusted model
+glm_fit0 <- glm(outcome ~ time_confirm, data = covid_final, family = "binomial")
+
+summary(glm_fit0)
+
+odds.n.ends(glm_fit0)
+
+#Adjusted model
+glm_fit <- glm(outcome ~ time_confirm + sex + country, data = covid_final, family = "binomial")
+
+summary(glm_fit)
+
+odds.n.ends(glm_fit)
+
+
+treat_int.mod<-coxph(Surv(time_confirm , outcome)~sex + country, covid_final )
+summary(treat_int.mod)
+
+
+```
+
+For every unit increase in time from onset of symptoms to confirmation of disease, the likelihood of death increases by 0.03 (beta = 0.03, p = 0.511).
+
+Compared to females, the log odds of death from covid-19 in males are 0.06 times higher(beta = 0.06, p = 0.919). 
+
+
+```{r}
+# testing assumptions
+covid_final$time_confirm<-as.numeric(covid_final$time_confirm)# convert time from difftime format to numeric to allow for log calculation
+
+#Linearity
+time.times.logtime <- covid_final$time_confirm * log(covid_final$time_confirm) #interaction term for linearity
+
+boxtidwelltime <- glm(outcome ~ time_confirm + time.times.logtime, data = covid_final)
+
+summary(boxtidwelltime)
+
+# assumption of linearity is met; p-value of interaction termis non-significant (p> 0.05)
+
+#Multicollinearity
+library(car) # for vif function
+vif(glm_fit)
+
+# no problems with multicollinearity detected
+
+
+```
+
+
+
+
